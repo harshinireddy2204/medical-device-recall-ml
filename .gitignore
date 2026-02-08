@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+
+# ALL Data Files
+*.txt
+*.csv
+*.json
+*.zip
+*.xlsx
+*.xls
+
+# Raw Data Folders
+data/raw/
+data/processed/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
+
+# Streamlit
+.streamlit/
+
+# Large Model Files
+*.parquet
+*.joblib
+*.bak
+*.pkl
+
+# Office Files
+*.docx
+*.doc
+*.pptx
+*.pdf
+
+# Tableau
+*.twb
+*.twbx
+
+# Keep structure but ignore content
+!data/raw/.gitkeep
+!data/processed/.gitkeep
