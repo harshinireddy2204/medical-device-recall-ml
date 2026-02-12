@@ -1,7 +1,3 @@
-HEAD
-# medical-device-recall-ml
-End-to-end ML pipeline for FDA medical device recall classification and RPSS scoring
-
 # FDA Medical Device Recall Risk Intelligence System
 
 ## 🎯 Project Overview
@@ -12,6 +8,7 @@ An end-to-end data engineering and analytics pipeline that transforms fragmented
 
 ![Dashboard Preview](assets/dashboard_preview.png) *(Add screenshot)*
 
+---
 
 ## 💡 Business Problem
 
@@ -29,9 +26,11 @@ An end-to-end data engineering and analytics pipeline that transforms fragmented
 - Prioritize quality system audits based on failure mechanism patterns
 - Allocate post-market surveillance resources where risk is highest
 
+---
 
 ## 🏗️ System Architecture
 
+```
 ┌─────────────────┐
 │  FDA Data APIs  │
 │  - MAUDE        │
@@ -85,7 +84,9 @@ An end-to-end data engineering and analytics pipeline that transforms fragmented
 │  • Root cause impact analysis               │
 │  • Export capabilities                      │
 └─────────────────────────────────────────────┘
+```
 
+---
 
 ## 📊 Key Features
 
@@ -107,6 +108,7 @@ An end-to-end data engineering and analytics pipeline that transforms fragmented
 - ✅ **Professional Visualizations**: Plotly charts with drill-down capabilities
 - ✅ **Export Functionality**: CSV download of filtered datasets
 
+---
 
 ## 🛠️ Tech Stack
 
@@ -119,10 +121,11 @@ An end-to-end data engineering and analytics pipeline that transforms fragmented
 | **Dashboard** | Streamlit, Plotly, Pandas | Interactive analytics interface |
 | **Version Control** | Git, GitHub | Code management |
 
+---
 
 ## 📁 Project Structure
 
-text
+```
 FDA_pipeline/
 ├── data/
 │   └── raw/                          # Raw FDA data files
@@ -155,6 +158,9 @@ FDA_pipeline/
 ├── .gitignore
 ├── README.md
 └── requirements.txt
+```
+
+---
 
 ## 🚀 Getting Started
 
@@ -248,6 +254,8 @@ This project demonstrates proficiency in:
 - Stakeholder-focused storytelling
 - Performance optimization for large datasets
 
+---
+
 ## 📈 Future Enhancements
 
 - [ ] **Machine Learning:** Train classification models to predict recall likelihood
@@ -257,6 +265,7 @@ This project demonstrates proficiency in:
 - [ ] **Cloud Deployment:** Deploy dashboard on AWS/Azure for public access
 - [ ] **Automated Alerts:** Email notifications for new critical-risk devices
 
+---
 
 ## 📝 Data Sources
 
@@ -266,6 +275,8 @@ All data sourced from publicly available FDA databases:
 - **510(k):** [Premarket Notification Database](https://www.fda.gov/medical-devices/device-approvals-denials-and-clearances/510k-clearances)
 - **PMA:** [Premarket Approval Database](https://www.fda.gov/medical-devices/device-approvals-denials-and-clearances/pma-approvals)
 - **Recalls:** [Medical Device Recalls Database](https://www.fda.gov/medical-devices/medical-device-recalls)
+
+---
 
 ## 👤 Author
 
