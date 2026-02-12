@@ -122,6 +122,7 @@ An end-to-end data engineering and analytics pipeline that transforms fragmented
 
 ## 📁 Project Structure
 
+text
 FDA_pipeline/
 ├── data/
 │   └── raw/                          # Raw FDA data files
