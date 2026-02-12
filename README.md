@@ -6,7 +6,9 @@ An end-to-end data engineering and analytics pipeline that transforms fragmented
 
 **Live Dashboard:** [View Demo](#) *(Add your deployed URL here)*
 
-![Dashboard Preview](assets/dashboard_preview.png) *(Add screenshot)*
+![Dashboard Preview]
+<img width="1913" height="975" alt="image" src="https://github.com/user-attachments/assets/f34a4e17-8012-4500-8905-1b9ea1b3aeb4" />
+
 
 ---
 
