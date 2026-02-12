@@ -41,7 +41,6 @@ env/
 *.ldf
 
 # ALL Data Files
-*.txt
 *.csv
 *.json
 *.zip
