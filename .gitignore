@@ -83,3 +83,6 @@ desktop.ini
 # Keep structure but ignore content
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+
+# Allow dashboard sample data for cloud deployment
+!visualization/device_rpss_sample.csv
