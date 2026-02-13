@@ -43,27 +43,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------------
-# Database Connection
-# -------------------------------
-@st.cache_resource
-def get_engine():
-    """Create SQLAlchemy engine (cached)"""
-    connection_string = (
-        "mssql+pyodbc:///?odbc_connect="
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=localhost;"
-        "DATABASE=FDADatabase;"
-        "Trusted_Connection=yes;"
-    )
-    return create_engine(connection_string, pool_pre_ping=True, pool_size=5, max_overflow=10)
-
-engine = get_engine()
-
-# -------------------------------
-# Optimized Data Loading (BIGINT safe)
-# -------------------------------
-
-# -------------------------------
 # Data Source (CSV snapshot)
 # -------------------------------
 DATA_PATH = "visualization/device_rpss_sample.csv"
