@@ -45,7 +45,8 @@ st.markdown("""
 # -------------------------------
 # Data Source (CSV snapshot)
 # -------------------------------
-DATA_PATH = "visualization/device_rpss_sample.csv"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(SCRIPT_DIR, "device_rpss_sample.csv")
 
 
 @st.cache_data(ttl=600, show_spinner=False)
