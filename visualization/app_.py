@@ -46,6 +46,7 @@ st.markdown("""
 # -------------------------------
 # Data Source (CSV snapshot)
 # -------------------------------
+# Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(SCRIPT_DIR, "device_rpss_sample.csv")
 
@@ -249,9 +250,17 @@ try:
         if stats['total_adverse'] > 1_000_000_000:
             st.sidebar.warning(f"⚠️ Large Dataset: {stats['total_adverse']:,.0f} adverse events")
             
+except FileNotFoundError as e:
+    st.error(f"❌ CSV file not found: {str(e)}")
+    st.info(f"Looking for file at: `{DATA_PATH}`")
+    st.info("Please ensure `device_rpss_sample.csv` is in the `visualization/` folder and committed to the repository.")
+    st.stop()
 except Exception as e:
     st.error(f"❌ Error loading data: {str(e)}")
-    st.info("Please check your database connection and ensure the model.device_rpss table exists.")
+    st.info(f"File path attempted: `{DATA_PATH}`")
+    import traceback
+    with st.expander("🔍 Full error details"):
+        st.code(traceback.format_exc())
     st.stop()
 
 # -------------------------------

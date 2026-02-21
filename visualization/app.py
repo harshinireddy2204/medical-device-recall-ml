@@ -1,10 +1,10 @@
 import streamlit as st
-from sqlalchemy import create_engine, text
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
+import os
 
 # -------------------------------
 # Page Config
@@ -44,212 +44,196 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------------
-# Database Connection
+# Data Source (CSV snapshot)
 # -------------------------------
-@st.cache_resource
-def get_engine():
-    """Create SQLAlchemy engine (cached)"""
-    connection_string = (
-        "mssql+pyodbc:///?odbc_connect="
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=localhost;"
-        "DATABASE=FDADatabase;"
-        "Trusted_Connection=yes;"
-    )
-    return create_engine(connection_string, pool_pre_ping=True, pool_size=5, max_overflow=10)
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(SCRIPT_DIR, "device_rpss_sample.csv")
 
-engine = get_engine()
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_base_data():
+    """
+    Load the full device RPSS dataset from CSV.
+
+    Expected columns (at minimum):
+    PMA_PMN_NUM, rpss, rpss_category, recall_count,
+    total_adverse_events, unique_manufacturers,
+    device_class, root_cause_description
+    """
+    df = pd.read_csv(DATA_PATH)
+
+    # Ensure key numeric columns are the right dtype
+    numeric_cols = [
+        "rpss",
+        "recall_count",
+        "total_adverse_events",
+        "device_class",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df
 
 # -------------------------------
 # Optimized Data Loading (BIGINT safe)
 # -------------------------------
 @st.cache_data(ttl=600, show_spinner=False)
 def load_summary_stats():
-    """Load summary statistics with BIGINT support"""
-    query = """
-    SELECT 
-        COUNT(*) as total_devices,
-        CAST(AVG(rpss) AS FLOAT) as avg_rpss,
-        CAST(SUM(CAST(recall_count AS BIGINT)) AS BIGINT) as total_recalls,
-        CAST(SUM(CAST(total_adverse_events AS BIGINT)) AS BIGINT) as total_adverse,
-        SUM(CASE WHEN rpss_category = 'Critical' THEN 1 ELSE 0 END) as critical_count,
-        SUM(CASE WHEN rpss_category = 'High' THEN 1 ELSE 0 END) as high_count,
-        SUM(CASE WHEN rpss_category = 'Medium' THEN 1 ELSE 0 END) as medium_count,
-        SUM(CASE WHEN rpss_category = 'Low' THEN 1 ELSE 0 END) as low_count,
-        MAX(total_adverse_events) as max_adverse_single_device
-    FROM model.device_rpss
-    """
-    df = pd.read_sql(query, engine)
-    return df.iloc[0]
+    """Load summary statistics from CSV (BIGINT safe via int64 in pandas)."""
+    df = load_base_data()
+
+    total_devices = len(df)
+    avg_rpss = float(df["rpss"].mean())
+
+    total_recalls = int(df["recall_count"].fillna(0).astype("int64").sum())
+    total_adverse = int(df["total_adverse_events"].fillna(0).astype("int64").sum())
+
+    critical_count = (df["rpss_category"] == "Critical").sum()
+    high_count = (df["rpss_category"] == "High").sum()
+    medium_count = (df["rpss_category"] == "Medium").sum()
+    low_count = (df["rpss_category"] == "Low").sum()
+
+    max_adverse_single_device = int(df["total_adverse_events"].fillna(0).max())
+
+    return pd.Series(
+        {
+            "total_devices": total_devices,
+            "avg_rpss": avg_rpss,
+            "total_recalls": total_recalls,
+            "total_adverse": total_adverse,
+            "critical_count": critical_count,
+            "high_count": high_count,
+            "medium_count": medium_count,
+            "low_count": low_count,
+            "max_adverse_single_device": max_adverse_single_device,
+        }
+    )
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_filter_options():
-    """Load unique values for filters"""
-    query = """
-    SELECT DISTINCT
-        rpss_category,
-        device_class,
-        root_cause_description
-    FROM model.device_rpss
-    WHERE rpss_category IS NOT NULL
-    """
-    return pd.read_sql(query, engine)
+    """Load unique values for filters from CSV."""
+    df = load_base_data()
+    df = df[df["rpss_category"].notna()]
+
+    return df[["rpss_category", "device_class", "root_cause_description"]].drop_duplicates()
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_filtered_data(risk_cats, device_classes, root_causes, rpss_min, rpss_max, min_recalls, limit=1000):
-    """Load filtered data with LIMIT for performance"""
-    
-    conditions = []
-    params = {}
-    
-    if risk_cats and 'All' not in risk_cats:
-        placeholders = ','.join([f':risk_{i}' for i in range(len(risk_cats))])
-        conditions.append(f"rpss_category IN ({placeholders})")
-        for i, cat in enumerate(risk_cats):
-            params[f'risk_{i}'] = cat
-    
-    if device_classes and 'All' not in device_classes:
-        placeholders = ','.join([f':class_{i}' for i in range(len(device_classes))])
-        conditions.append(f"device_class IN ({placeholders})")
-        for i, cls in enumerate(device_classes):
-            params[f'class_{i}'] = cls
-    
-    if root_causes and 'All' not in root_causes:
-        placeholders = ','.join([f':root_{i}' for i in range(len(root_causes))])
-        conditions.append(f"root_cause_description IN ({placeholders})")
-        for i, root in enumerate(root_causes):
-            params[f'root_{i}'] = root
-    
-    conditions.append("rpss BETWEEN :rpss_min AND :rpss_max")
-    params['rpss_min'] = rpss_min
-    params['rpss_max'] = rpss_max
-    
-    conditions.append("recall_count >= :min_recalls")
-    params['min_recalls'] = min_recalls
-    
-    where_clause = " AND ".join(conditions) if conditions else "1=1"
-    
-    # Get total count first
-    count_query = f"SELECT COUNT(*) as cnt FROM model.device_rpss WHERE {where_clause}"
-    total_count = pd.read_sql(text(count_query), engine, params=params).iloc[0]['cnt']
-    
-    # Get data with limit
-    query = f"""
-    SELECT TOP {limit}
-        PMA_PMN_NUM,
-        rpss,
-        rpss_category,
-        recall_count,
-        total_adverse_events,
-        unique_manufacturers,
-        device_class,
-        root_cause_description
-    FROM model.device_rpss
-    WHERE {where_clause}
-    ORDER BY rpss DESC
-    """
-    
-    df = pd.read_sql(text(query), engine, params=params)
-    return df, total_count
+    """Load filtered data from CSV with LIMIT for performance."""
+    df = load_base_data()
+
+    # Start with all rows
+    mask = pd.Series(True, index=df.index)
+
+    if risk_cats and "All" not in risk_cats:
+        mask &= df["rpss_category"].isin(risk_cats)
+
+    if device_classes and "All" not in device_classes:
+        mask &= df["device_class"].isin(device_classes)
+
+    if root_causes and "All" not in root_causes:
+        mask &= df["root_cause_description"].isin(root_causes)
+
+    mask &= df["rpss"].between(rpss_min, rpss_max, inclusive="both")
+    mask &= df["recall_count"].fillna(0) >= min_recalls
+
+    df_filtered_all = df[mask].copy()
+    total_count = len(df_filtered_all)
+
+    # Sort by RPSS and limit
+    df_filtered_limited = (
+        df_filtered_all.sort_values("rpss", ascending=False)
+        .head(limit)[
+            [
+                "PMA_PMN_NUM",
+                "rpss",
+                "rpss_category",
+                "recall_count",
+                "total_adverse_events",
+                "unique_manufacturers",
+                "device_class",
+                "root_cause_description",
+            ]
+        ]
+    )
+
+    return df_filtered_limited, total_count
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_risk_distribution(risk_cats, device_classes, root_causes, rpss_min, rpss_max, min_recalls):
-    """Optimized aggregation for risk distribution"""
-    
-    conditions = []
-    params = {}
-    
-    if risk_cats and 'All' not in risk_cats:
-        placeholders = ','.join([f':risk_{i}' for i in range(len(risk_cats))])
-        conditions.append(f"rpss_category IN ({placeholders})")
-        for i, cat in enumerate(risk_cats):
-            params[f'risk_{i}'] = cat
-    
-    if device_classes and 'All' not in device_classes:
-        placeholders = ','.join([f':class_{i}' for i in range(len(device_classes))])
-        conditions.append(f"device_class IN ({placeholders})")
-        for i, cls in enumerate(device_classes):
-            params[f'class_{i}'] = cls
-    
-    if root_causes and 'All' not in root_causes:
-        placeholders = ','.join([f':root_{i}' for i in range(len(root_causes))])
-        conditions.append(f"root_cause_description IN ({placeholders})")
-        for i, root in enumerate(root_causes):
-            params[f'root_{i}'] = root
-    
-    conditions.append("rpss BETWEEN :rpss_min AND :rpss_max")
-    params['rpss_min'] = rpss_min
-    params['rpss_max'] = rpss_max
-    
-    conditions.append("recall_count >= :min_recalls")
-    params['min_recalls'] = min_recalls
-    
-    where_clause = " AND ".join(conditions) if conditions else "1=1"
-    
-    query = f"""
-    SELECT 
-        rpss_category,
-        COUNT(*) as count,
-        CAST(SUM(CAST(recall_count AS BIGINT)) AS BIGINT) as total_recalls,
-        CAST(SUM(CAST(total_adverse_events AS BIGINT)) AS BIGINT) as total_adverse
-    FROM model.device_rpss
-    WHERE {where_clause}
-    GROUP BY rpss_category
-    """
-    
-    return pd.read_sql(text(query), engine, params=params)
+    """Optimized aggregation for risk distribution from CSV."""
+    df = load_base_data()
+
+    mask = pd.Series(True, index=df.index)
+
+    if risk_cats and "All" not in risk_cats:
+        mask &= df["rpss_category"].isin(risk_cats)
+
+    if device_classes and "All" not in device_classes:
+        mask &= df["device_class"].isin(device_classes)
+
+    if root_causes and "All" not in root_causes:
+        mask &= df["root_cause_description"].isin(root_causes)
+
+    mask &= df["rpss"].between(rpss_min, rpss_max, inclusive="both")
+    mask &= df["recall_count"].fillna(0) >= min_recalls
+
+    df_f = df[mask].copy()
+    df_f["recall_count"] = df_f["recall_count"].fillna(0).astype("int64")
+    df_f["total_adverse_events"] = df_f["total_adverse_events"].fillna(0).astype("int64")
+
+    grouped = (
+        df_f.groupby("rpss_category", dropna=False)
+        .agg(
+            count=("PMA_PMN_NUM", "size"),
+            total_recalls=("recall_count", "sum"),
+            total_adverse=("total_adverse_events", "sum"),
+        )
+        .reset_index()
+    )
+
+    return grouped
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_root_cause_analysis(risk_cats, device_classes, root_causes, rpss_min, rpss_max, min_recalls):
-    """Optimized root cause aggregation"""
-    
-    conditions = []
-    params = {}
-    
-    if risk_cats and 'All' not in risk_cats:
-        placeholders = ','.join([f':risk_{i}' for i in range(len(risk_cats))])
-        conditions.append(f"rpss_category IN ({placeholders})")
-        for i, cat in enumerate(risk_cats):
-            params[f'risk_{i}'] = cat
-    
-    if device_classes and 'All' not in device_classes:
-        placeholders = ','.join([f':class_{i}' for i in range(len(device_classes))])
-        conditions.append(f"device_class IN ({placeholders})")
-        for i, cls in enumerate(device_classes):
-            params[f'class_{i}'] = cls
-    
-    if root_causes and 'All' not in root_causes:
-        placeholders = ','.join([f':root_{i}' for i in range(len(root_causes))])
-        conditions.append(f"root_cause_description IN ({placeholders})")
-        for i, root in enumerate(root_causes):
-            params[f'root_{i}'] = root
-    
-    conditions.append("rpss BETWEEN :rpss_min AND :rpss_max")
-    params['rpss_min'] = rpss_min
-    params['rpss_max'] = rpss_max
-    
-    conditions.append("recall_count >= :min_recalls")
-    params['min_recalls'] = min_recalls
-    
-    conditions.append("root_cause_description != 'Other'")
-    
-    where_clause = " AND ".join(conditions) if conditions else "1=1"
-    
-    query = f"""
-    SELECT 
-        root_cause_description,
-        AVG(rpss) as avg_rpss,
-        COUNT(DISTINCT PMA_PMN_NUM) as device_count,
-        CAST(SUM(CAST(recall_count AS BIGINT)) AS BIGINT) as total_recalls,
-        CAST(SUM(CAST(total_adverse_events AS BIGINT)) AS BIGINT) as total_adverse
-    FROM model.device_rpss
-    WHERE {where_clause}
-    GROUP BY root_cause_description
-    HAVING COUNT(DISTINCT PMA_PMN_NUM) >= 5
-    ORDER BY avg_rpss DESC
-    """
-    
-    return pd.read_sql(text(query), engine, params=params).head(10)
+    """Optimized root cause aggregation from CSV."""
+    df = load_base_data()
+
+    mask = pd.Series(True, index=df.index)
+
+    if risk_cats and "All" not in risk_cats:
+        mask &= df["rpss_category"].isin(risk_cats)
+
+    if device_classes and "All" not in device_classes:
+        mask &= df["device_class"].isin(device_classes)
+
+    if root_causes and "All" not in root_causes:
+        mask &= df["root_cause_description"].isin(root_causes)
+
+    mask &= df["rpss"].between(rpss_min, rpss_max, inclusive="both")
+    mask &= df["recall_count"].fillna(0) >= min_recalls
+    mask &= df["root_cause_description"] != "Other"
+
+    df_f = df[mask].copy()
+    df_f["recall_count"] = df_f["recall_count"].fillna(0).astype("int64")
+    df_f["total_adverse_events"] = df_f["total_adverse_events"].fillna(0).astype("int64")
+
+    grouped = (
+        df_f.groupby("root_cause_description")
+        .agg(
+            avg_rpss=("rpss", "mean"),
+            device_count=("PMA_PMN_NUM", "nunique"),
+            total_recalls=("recall_count", "sum"),
+            total_adverse=("total_adverse_events", "sum"),
+        )
+        .reset_index()
+    )
+
+    grouped = grouped[grouped["device_count"] >= 5].sort_values("avg_rpss", ascending=False)
+
+    return grouped.head(10)
 
 # -------------------------------
 # Load Initial Data
