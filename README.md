@@ -4,7 +4,9 @@
 
 An end-to-end data engineering and analytics pipeline that transforms fragmented FDA post-market surveillance data into actionable risk intelligence. The system processes over **2.4 billion adverse events** across **9,100+ medical devices** to predict recall severity patterns and enable risk-based regulatory prioritization.
 
-**Live Dashboard:** [View Demo](#) *(Add your deployed URL here)*
+**Live Dashboard:** [View Demo](#) *(Add your deployed URL here)*  
+
+📘 **Deploy:** See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for Streamlit Cloud or self-hosted instructions.
 
 ![Dashboard Preview]
 <img width="1913" height="975" alt="image" src="https://github.com/user-attachments/assets/f34a4e17-8012-4500-8905-1b9ea1b3aeb4" />

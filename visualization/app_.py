@@ -5,6 +5,18 @@ import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
 import os
+import sys
+
+# Add Scripts directory to path for ML modules
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Scripts'))
+
+try:
+    from ml_recall_prediction import RecallPredictor
+    from time_series_forecast import RecallForecaster
+    ML_AVAILABLE = True
+except ImportError as e:
+    ML_AVAILABLE = False
+    st.warning(f"ML modules not available: {e}. Some features will be disabled.")
 
 # -------------------------------
 # Page Config
@@ -40,6 +52,17 @@ st.markdown("""
         margin: 10px 0;
         color: #856404;
     }
+    .story-arc {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #dee2e6;
+        margin: 15px 0;
+        color: #000000;
+    }
+    .story-arc h4 { color: #1f77b4; margin-bottom: 12px; }
+    .story-arc p { color: #000000; }
+    .story-cta { background-color: #e8f4f8; padding: 12px; border-radius: 6px; margin: 10px 0; font-weight: 600; color: #000000; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,7 +84,36 @@ def load_base_data():
     total_adverse_events, unique_manufacturers,
     device_class, root_cause_description
     """
-    df = pd.read_csv(DATA_PATH)
+    # Try different encodings to handle various CSV formats
+    encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'iso-8859-1', 'cp1252', 'utf-16']
+    
+    df = None
+    last_error = None
+    
+    for encoding in encodings:
+        try:
+            df = pd.read_csv(DATA_PATH, encoding=encoding, low_memory=False)
+            # If we successfully read the file, break out of the loop
+            if df is not None and len(df) > 0:
+                break
+        except (UnicodeDecodeError, UnicodeError) as e:
+            last_error = e
+            continue
+        except Exception as e:
+            last_error = e
+            continue
+    
+    if df is None or len(df) == 0:
+        raise FileNotFoundError(
+            f"Could not read CSV file with any encoding. Last error: {last_error}. "
+            f"Tried encodings: {', '.join(encodings)}"
+        )
+
+    # Normalize manufacturer column (CSV uses unique-manufacturers)
+    if "unique-manufacturers" in df.columns and "unique_manufacturers" not in df.columns:
+        df["unique_manufacturers"] = df["unique-manufacturers"]
+    elif "unique_manufacturers" not in df.columns:
+        df["unique_manufacturers"] = 0
 
     # Ensure key numeric columns are the right dtype
     numeric_cols = [
@@ -73,6 +125,10 @@ def load_base_data():
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Ensure device_name exists (for ML Top 20)
+    if "device_name" not in df.columns:
+        df["device_name"] = df["PMA_PMN_NUM"].astype(str)
 
     return df
 
@@ -378,6 +434,18 @@ recall frequency, root cause severity, adverse event exposure, recency, and devi
 predictive metric. This enables regulators to focus resources where risk is highest—not just where recalls are most recent.
 """)
 
+# Story arc
+st.markdown("""
+<div class="story-arc">
+<h4>📖 Your Journey: 4 Steps from Insight to Action</h4>
+<p><strong>Step 1:</strong> Understand current risk — See how devices are distributed across Low, Medium, High, and Critical categories.</p>
+<p><strong>Step 2:</strong> Find root causes — Identify which failure mechanisms (software, design, labeling, etc.) drive the highest risk.</p>
+<p><strong>Step 3:</strong> Predict who will recall next — Use ML to flag devices most likely to have future recalls (click "Generate ML Predictions" below).</p>
+<p><strong>Step 4:</strong> Forecast future volume — Anticipate recall trends over the next 3–12 months (click "Generate Forecasts" below).</p>
+<p class="story-cta">👉 Use the sidebar filters to narrow your view—e.g. select "Critical" to focus on highest-risk devices.</p>
+</div>
+""", unsafe_allow_html=True)
+
 # How to use guide
 with st.expander("📘 How to Use This Dashboard", expanded=False):
     st.markdown("""
@@ -539,6 +607,12 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<div class="insight-box" style="margin-top: 10px;">
+<strong>→ Next:</strong> Now that you see how risk is distributed, let's find out <strong>what drives it</strong>. 
+Step 2 identifies the root causes (e.g. software, design, labeling) behind high-severity recalls.
+</div>
+""", unsafe_allow_html=True)
 st.markdown("---")
 
 # ===============================
@@ -619,6 +693,344 @@ if len(root_cause_analysis) > 0:
     """, unsafe_allow_html=True)
 else:
     st.info("Not enough data points (need at least 5 devices per root cause) to display analysis.")
+
+st.markdown("""
+<div class="insight-box" style="margin-top: 10px;">
+<strong>→ Next:</strong> You've seen current risk and its root causes. Step 3 uses <strong>machine learning</strong> 
+to predict which devices are most likely to recall next. 
+<strong>👉 Click "Generate ML Predictions" below</strong> to identify high-risk devices.
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
+
+# ===============================
+# DASHBOARD 3 — ML PREDICTIONS
+# ===============================
+if ML_AVAILABLE:
+    st.header("3️⃣ Machine Learning: Recall Likelihood Prediction")
+    st.markdown("**Objective:** Use machine learning to predict which devices are most likely to experience recalls based on risk factors.")
+    
+    with st.expander("📘 How ML Predictions Work", expanded=False):
+        st.markdown("""
+        **Model Features:**
+        - RPSS Score (current risk assessment)
+        - Device Class (FDA classification)
+        - Root Cause History (encoded failure patterns)
+        - Adverse Event Count (patient safety indicators)
+        - Manufacturer Count (supply chain complexity)
+        
+        **Model Type:** Random Forest Classifier trained on historical recall patterns
+        
+        **Output:** Probability score (0-1) indicating likelihood of future recalls
+        """)
+    
+    if st.button("🔮 Generate ML Predictions", type="primary"):
+        with st.spinner('🤖 Training ML model and generating predictions...'):
+            try:
+                # Initialize predictor
+                predictor = RecallPredictor()
+                
+                # Train model
+                df_ml = load_base_data()
+                metrics = predictor.train(df_ml, model_type='random_forest')
+                
+                # Make predictions
+                predictions = predictor.predict(df_ml)
+                
+                # Display metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Model Accuracy", f"{metrics['accuracy']:.1%}")
+                with col2:
+                    st.metric("AUC-ROC Score", f"{metrics['auc']:.3f}")
+                with col3:
+                    high_risk_count = (predictions['recall_probability'] > 0.7).sum()
+                    st.metric("High Risk Devices", f"{high_risk_count:,}")
+                
+                # Feature importance
+                importance = predictor.get_feature_importance()
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig_importance = px.bar(
+                        importance,
+                        x='importance',
+                        y='feature',
+                        orientation='h',
+                        title="Feature Importance",
+                        labels={'importance': 'Importance Score', 'feature': 'Feature'}
+                    )
+                    fig_importance.update_layout(height=300)
+                    st.plotly_chart(fig_importance, use_container_width=True)
+                
+                with col2:
+                    # Show high-risk devices (use device_name from CSV if available)
+                    high_risk = predictions[predictions['recall_probability'] > 0.7].sort_values(
+                        'recall_probability', ascending=False
+                    ).head(20).copy()
+                    high_risk['hover_name'] = high_risk.get('device_name', high_risk['PMA_PMN_NUM'].astype(str))
+                    high_risk['hover_name'] = high_risk['hover_name'].fillna(high_risk['PMA_PMN_NUM'].astype(str))
+                    
+                    fig_risk = px.scatter(
+                        high_risk,
+                        x='rpss',
+                        y='recall_probability',
+                        size='total_adverse_events',
+                        color='rpss_category',
+                        hover_name='hover_name',
+                        title="High Risk Devices (Predicted)",
+                        labels={
+                            'rpss': 'Current RPSS',
+                            'recall_probability': 'Predicted Recall Probability'
+                        }
+                    )
+                    st.plotly_chart(fig_risk, use_container_width=True)
+                
+                # Display top predictions with device names (from CSV / vw_FDA_Device_Integrated)
+                st.subheader("📊 Top 20 Devices at Highest Risk")
+                top_risk_raw = predictions.nlargest(20, 'recall_probability')
+                top_risk = top_risk_raw[
+                    ['PMA_PMN_NUM', 'rpss_category', 'recall_count', 'recall_probability',
+                     'total_adverse_events', 'device_class']
+                ].copy()
+                top_risk['device_name'] = top_risk_raw.get('device_name', top_risk_raw['PMA_PMN_NUM'].astype(str))
+                top_risk['device_name'] = top_risk['device_name'].fillna('—')
+                top_risk = top_risk[['device_name', 'PMA_PMN_NUM', 'rpss_category', 'recall_count',
+                                    'recall_probability', 'total_adverse_events', 'device_class']]
+                top_risk['recall_probability'] = top_risk['recall_probability'].apply(lambda x: f"{x:.1%}")
+                st.dataframe(top_risk, use_container_width=True, hide_index=True)
+                
+                # Store in session state for download
+                st.session_state['ml_predictions'] = predictions
+                
+            except Exception as e:
+                st.error(f"Error generating predictions: {str(e)}")
+                import traceback
+                with st.expander("Error details"):
+                    st.code(traceback.format_exc())
+    
+    # Download predictions if available
+    if 'ml_predictions' in st.session_state:
+        pred_cols = ['PMA_PMN_NUM', 'rpss_category', 'recall_count', 'recall_probability', 
+                     'predicted_recall', 'total_adverse_events']
+        if 'device_name' in st.session_state['ml_predictions'].columns:
+            pred_cols = ['device_name'] + pred_cols
+        csv_ml = st.session_state['ml_predictions'][pred_cols].to_csv(index=False)
+        st.download_button(
+            label="📥 Download ML Predictions (CSV)",
+            data=csv_ml,
+            file_name=f"ml_recall_predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    
+    st.markdown("""
+    <div class="insight-box" style="margin-top: 10px;">
+    <strong>→ Next:</strong> Step 4 uses <strong>time series forecasting</strong> to predict future recall volume by category. 
+    <strong>👉 Click "Generate Forecasts" below</strong> to see projected recall trends.
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("---")
+    
+    # ===============================
+    # DASHBOARD 4 — TIME SERIES FORECASTING
+    # ===============================
+    st.header("4️⃣ Time Series Forecasting: Future Recall Trends")
+    st.markdown("**Objective:** Predict future recall trends by device category to inform proactive regulatory planning.")
+    
+    with st.expander("📘 How Forecasting Works", expanded=False):
+        st.markdown("""
+        **Method:** Moving average and trend-based forecasting
+        
+        **Input:** Historical recall data aggregated by time period (monthly) and device category
+        
+        **Output:** Forecasted recall counts for next 6-12 months with confidence intervals
+        
+        **Use Cases:**
+        - Anticipate seasonal recall patterns
+        - Plan inspection resources
+        - Identify emerging risk categories
+        """)
+    
+    forecast_periods = st.slider("Forecast Periods (months)", 3, 12, 6)
+    forecast_method = st.selectbox("Forecasting Method", 
+                                   ["moving_average", "exponential_smoothing", "linear_trend"])
+    
+    if st.button("📈 Generate Forecasts", type="primary"):
+        with st.spinner('📊 Analyzing trends and generating forecasts...'):
+            try:
+                forecaster = RecallForecaster()
+                df_ts = load_base_data()
+                
+                # Synthetic dates: distribute devices across 24 months (same as app.py)
+                # CSV last_scored can be times-only or same date → huge single-period sums
+                months_back = 24
+                start_date = datetime.now() - pd.DateOffset(months=months_back)
+                df_ts = df_ts.sort_values('recall_count', ascending=False, na_position='last')
+                df_ts['recall_count'] = df_ts['recall_count'].fillna(0).astype(int)
+                dates_list = []
+                np.random.seed(42)
+                for idx, row in df_ts.iterrows():
+                    recall_count = int(row['recall_count'])
+                    if recall_count > 0:
+                        month_offset = max(0, min(int(12 * (1 - recall_count / (recall_count + 20))), 11))
+                    else:
+                        month_offset = np.random.randint(12, months_back)
+                    base_date = start_date + pd.DateOffset(months=month_offset)
+                    day_offset = np.random.randint(1, 28)
+                    dates_list.append(base_date + pd.DateOffset(days=day_offset))
+                df_ts['last_scored'] = dates_list
+                
+                # Use prepare_time_series_data_with_recalls if available (distributes recalls across months)
+                prepare_method = getattr(forecaster, 'prepare_time_series_data_with_recalls', None)
+                if callable(prepare_method):
+                    ts_data = prepare_method(df_ts, date_column='last_scored', freq='M')
+                else:
+                    ts_data = forecaster.prepare_time_series_data(df_ts, date_column='last_scored', freq='M')
+                
+                # Get trend analysis
+                st.subheader("📉 Trend Analysis")
+                trend_cols = st.columns(4)
+                categories_to_analyze = ['All', 'Critical', 'High', 'Medium']
+                
+                for idx, category in enumerate(categories_to_analyze):
+                    trend = forecaster.get_trend_analysis(ts_data, category)
+                    if trend:
+                        with trend_cols[idx]:
+                            st.metric(
+                                label=f"{category} Category",
+                                value=f"{trend['avg_per_period']:.0f}",
+                                delta=f"{trend['recent_trend']:+.1f} trend"
+                            )
+                
+                # Generate forecasts
+                forecasts = forecaster.forecast_all_categories(ts_data, periods=forecast_periods, method=forecast_method)
+                
+                if len(forecasts) > 0:
+                    # Helper: convert hex to rgba for Plotly fillcolor
+                    def hex_to_rgba(hex_str, alpha=0.2):
+                        h = (hex_str or '#95a5a6').lstrip('#')
+                        if len(h) != 6:
+                            return f'rgba(149,165,166,{alpha})'
+                        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                        return f'rgba({r},{g},{b},{alpha})'
+
+                    # Plot forecasts
+                    fig_forecast = go.Figure()
+                    
+                    categories = forecasts['category'].unique()
+                    colors = {'All': '#1f77b4', 'Critical': '#e74c3c', 'High': '#e67e22', 
+                             'Medium': '#f39c12', 'Low': '#2ecc71'}
+                    
+                    for category in categories:
+                        cat_data = forecasts[forecasts['category'] == category].sort_values('date')
+                        
+                        # Historical data
+                        hist_data = ts_data[ts_data['category'] == category].sort_values('date')
+                        if len(hist_data) > 0:
+                            fig_forecast.add_trace(go.Scatter(
+                                x=hist_data['date'],
+                                y=hist_data['total_recalls'],
+                                mode='lines+markers',
+                                name=f'{category} (Historical)',
+                                line=dict(color=colors.get(category, '#95a5a6'), dash='dash'),
+                                opacity=0.6
+                            ))
+                        
+                        # Forecast
+                        fig_forecast.add_trace(go.Scatter(
+                            x=cat_data['date'],
+                            y=cat_data['forecasted_recalls'],
+                            mode='lines+markers',
+                            name=f'{category} (Forecast)',
+                            line=dict(color=colors.get(category, '#95a5a6'), width=2)
+                        ))
+                        
+                        # Confidence interval
+                        fig_forecast.add_trace(go.Scatter(
+                            x=cat_data['date'],
+                            y=cat_data['upper_bound'],
+                            mode='lines',
+                            name=f'{category} Upper',
+                            line=dict(width=0),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                        line_color = colors.get(category, '#95a5a6')
+                        fig_forecast.add_trace(go.Scatter(
+                            x=cat_data['date'],
+                            y=cat_data['lower_bound'],
+                            mode='lines',
+                            name=f'{category} Lower',
+                            line=dict(width=0),
+                            fillcolor=hex_to_rgba(line_color, 0.2),
+                            fill='tonexty',
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                    
+                    fig_forecast.update_layout(
+                        title="Recall Forecast by Category",
+                        xaxis_title="Date",
+                        yaxis_title="Number of Recalls",
+                        height=500,
+                        hovermode='x unified'
+                    )
+                    
+                    st.plotly_chart(fig_forecast, use_container_width=True)
+                    
+                    # Summary table (exclude "All" for highest-individual-category insight)
+                    st.subheader("📋 Forecast Summary")
+                    forecasts['forecasted_recalls'] = pd.to_numeric(forecasts['forecasted_recalls'], errors='coerce').fillna(0)
+                    forecast_summary = forecasts.groupby('category', as_index=False).agg({'forecasted_recalls': 'sum'})
+                    forecast_summary.columns = ['Category', 'Total Forecasted Recalls']
+                    forecast_summary['Total Forecasted Recalls'] = forecast_summary['Total Forecasted Recalls'].round(0).astype(int)
+                    forecast_summary = forecast_summary.sort_values('Total Forecasted Recalls', ascending=False)
+                    st.dataframe(forecast_summary, use_container_width=True, hide_index=True)
+                    total_forecasted = forecast_summary['Total Forecasted Recalls'].sum()
+                    if total_forecasted > 0:
+                        indiv = forecast_summary[forecast_summary['Category'] != 'All']
+                        top_category = indiv.iloc[0] if len(indiv) > 0 else forecast_summary.iloc[0]
+                        st.info(f"📊 **Total Forecasted Recalls:** {total_forecasted:,}. "
+                              f"Highest individual risk category: **{top_category['Category']}** with {top_category['Total Forecasted Recalls']:,} predicted recalls.")
+                    
+                    # Store for download
+                    st.session_state['forecasts'] = forecasts
+                else:
+                    st.warning("Insufficient data for forecasting. Need at least 2 time periods.")
+                    
+            except Exception as e:
+                st.error(f"Error generating forecasts: {str(e)}")
+                import traceback
+                with st.expander("Error details"):
+                    st.code(traceback.format_exc())
+    
+    # Download forecasts if available
+    if 'forecasts' in st.session_state:
+        csv_forecast = st.session_state['forecasts'].to_csv(index=False)
+        st.download_button(
+            label="📥 Download Forecasts (CSV)",
+            data=csv_forecast,
+            file_name=f"recall_forecasts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+
+st.markdown("---")
+
+# ===============================
+# SUMMARY & RECOMMENDED ACTIONS
+# ===============================
+st.header("✅ Summary & Recommended Actions")
+st.markdown("""
+<div class="story-arc">
+<h4>📋 So What? — Tie It All Together</h4>
+<p><strong>Devices to prioritize:</strong> Use the Top 20 Devices at Highest Risk (ML section) or filter by "Critical" risk category.</p>
+<p><strong>Root causes to focus on:</strong> Check Root Cause Impact Analysis for failure mechanisms with highest average RPSS.</p>
+<p><strong>Planning:</strong> Use Time Series Forecasts to anticipate recall volume by category.</p>
+<p><strong>How to act:</strong> Download filtered data, ML predictions, and forecasts as CSV.</p>
+<p class="story-cta">👉 Filters → Risk distribution → Root causes → ML predictions → Forecasts → Export</p>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 

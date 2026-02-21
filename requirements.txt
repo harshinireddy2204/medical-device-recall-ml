@@ -6,4 +6,11 @@ numpy==1.26.3
 streamlit==1.31.0
 plotly==5.18.0
 
+# Machine Learning
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Time Series Forecasting (optional - for advanced forecasting)
+# statsmodels>=0.14.0  # Uncomment if you want ARIMA models
+
 
