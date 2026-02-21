@@ -262,8 +262,6 @@ This project demonstrates proficiency in:
 
 ## 📈 Future Enhancements
 
-- [ ] **Machine Learning:** Train classification models to predict recall likelihood
-- [ ] **Time Series Forecasting:** Predict future recall trends by device category
 - [ ] **NLP Analysis:** Extract insights from recall reason descriptions
 - [ ] **API Development:** REST API for external system integration
 - [ ] **Cloud Deployment:** Deploy dashboard on AWS/Azure for public access
